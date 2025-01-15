@@ -1,47 +1,108 @@
 <!DOCTYPE html>
 <html lang="ja">
-
 <head>
     <meta charset="UTF-8">
-    <!-- ビューポートの設定：モバイルデバイスでの表示を最適化 -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>シンプルTODO</title>
+    <title>予約フォーム</title>
     <style>
-        /* フォームの上下に余白を追加 */
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
         .todo-form {
             margin: 1rem 0;
         }
 
-        /* 完了したTODOのスタイル：取り消し線と薄い色 */
         .completed {
             text-decoration: line-through;
             color: gray;
         }
+
+        form {
+            margin-bottom: 20px;
+        }
+
+        input[type="text"] {
+            padding: 8px;
+            margin-right: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+
+        button {
+            padding: 8px 15px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background-color: #45a049;
+        }
+
+        ul {
+            list-style: none;
+            padding: 0;
+        }
+
+        li {
+            display: flex;
+            align-items: center;
+            padding: 10px;
+            margin: 5px 0;
+            background-color: #f9f9f9;
+            border-radius: 4px;
+        }
+
+        li input[type="checkbox"] {
+            margin-right: 10px;
+        }
+
+        li span {
+            flex-grow: 1;
+            margin-right: 10px;
+        }
+
+        li button {
+            background-color: #f44336;
+        }
+
+        li button:hover {
+            background-color: #da190b;
+        }
     </style>
 </head>
-
 <body>
-    <h1>TODOリスト</h1>
+    <h1>予約システム</h1>
+    <h2>予約内容を登録してください</h2>
 
-    <!-- TODOを追加するためのフォーム -->
-    <form id="todoForm" class="todo-form">
-        <input type="text" id="todoInput" placeholder="新しいTODOを入力..." required>
-        <button type="submit">追加</button>
+    <form id="combinedForm">
+        <input type="text" id="todoInput" placeholder="名前を入力" required>
+        <input type="number" id="numberInput" placeholder="人数を入力" required>
+        <button type="submit">予約する</button>
     </form>
 
-    <!-- TODOリストを表示する場所 -->
-    <ul id="todoList"></ul>
+    <div class="lists-container">
+        <div class="list-section">
+            <h2>名前</h2>
+            <ul id="todoList"></ul>
+        </div>
+
+        <div class="list-section">
+            <h2>人数</h2>
+            <ul id="numberList"></ul>
+        </div>
+    </div>
 
     <script>
-        // APIサーバーのベースURL
-        const API_URL = '/todos';
+        const TODO_API_URL = '/todos';
+        const NUMBER_API_URL = '/numbers';
 
-        /**
-         * APIとの通信を行う汎用関数
-         * @param {string} endpoint - APIのエンドポイント
-         * @param {Object} options - fetchのオプション（メソッド、ヘッダーなど）
-         * @returns {Promise} APIからのレスポンス
-         */
         async function api(endpoint, options = {}) {
             try {
                 const response = await fetch(endpoint, options);
@@ -53,103 +114,104 @@
             }
         }
 
-        /**
-         * 1つのTODOアイテムのHTMLを生成
-         * @param {Object} todo - TODOオブジェクト（id, title, completedを含む）
-         * @returns {string} TODOアイテムのHTML文字列
-         */
-        function renderTodo(todo) {
+        function renderItem(item, type) {
+            const toggleFunction = type === 'todo' ? 'toggleTodo' : 'toggleNumber';
+            const deleteFunction = type === 'todo' ? 'deleteTodo' : 'deleteNumber';
             return `
                 <li>
                     <input type="checkbox" 
-                           ${todo.completed ? 'checked' : ''} 
-                           onchange="toggleTodo(${todo.id}, this.checked)">
-                    <span class="${todo.completed ? 'completed' : ''}">${todo.title}</span>
-                    <button onclick="deleteTodo(${todo.id})">削除</button>
+                           ${item.completed ? 'checked' : ''} 
+                           onchange="${toggleFunction}(${item.id}, this.checked)">
+                    <span class="${item.completed ? 'completed' : ''}">${item.title}</span>
+                    <button onclick="${deleteFunction}(${item.id})">削除</button>
                 </li>
             `;
         }
 
-        /**
-         * すべてのTODOを読み込んでページに表示
-         */
-        async function loadTodos() {
-            // APIからTODOリストを取得
-            const todos = await api(API_URL);
-            if (todos) {
-                // 取得したTODOをHTMLに変換して表示
-                document.getElementById('todoList').innerHTML =
-                    todos.map(renderTodo).join('');
+        async function loadItems(type) {
+            const apiUrl = type === 'todo' ? TODO_API_URL : NUMBER_API_URL;
+            const listId = type === 'todo' ? 'todoList' : 'numberList';
+            const items = await api(apiUrl);
+            if (items) {
+                document.getElementById(listId).innerHTML = 
+                    items.map(item => renderItem(item, type)).join('');
             }
         }
 
-        /**
-         * 新しいTODOを追加
-         * @param {string} title - 新しいTODOのタイトル
-         */
-        async function addTodo(title) {
-            // POSTリクエストでTODOを追加
-            await api(API_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ title, completed: false })
-            });
-            // リストを再読み込みして表示を更新
-            loadTodos();
+        async function addItems(todoTitle, numberTitle) {
+            if (todoTitle) {
+                await api(TODO_API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title: todoTitle, completed: false })
+                });
+            }
+
+            if (numberTitle) {
+                await api(NUMBER_API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title: numberTitle, completed: false })
+                });
+            }
+
+            loadItems('todo');
+            loadItems('number');
         }
 
-        /**
-         * TODOの完了状態を切り替え
-         * @param {number} id - TODOのID
-         * @param {boolean} completed - 新しい完了状態
-         */
-        async function toggleTodo(id, completed) {
-            // 現在のTODO情報を取得
-            const todo = await api(`${API_URL}/${id}`);
-            if (todo) {
-                // PUTリクエストでTODOを更新
-                await api(`${API_URL}/${id}`, {
+        async function toggleItem(type, id, completed) {
+            const apiUrl = type === 'todo' ? TODO_API_URL : NUMBER_API_URL;
+            const item = await api(`${apiUrl}/${id}`);
+            if (item) {
+                await api(`${apiUrl}/${id}`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ ...todo, completed })
+                    body: JSON.stringify({ ...item, completed })
                 });
-                // リストを再読み込みして表示を更新
-                loadTodos();
+                loadItems(type);
             }
         }
 
-        /**
-         * TODOを削除
-         * @param {number} id - 削除するTODOのID
-         */
-        async function deleteTodo(id) {
-            // DELETEリクエストでTODOを削除
-            await api(`${API_URL}/${id}`, { method: 'DELETE' });
-            // リストを再読み込みして表示を更新
-            loadTodos();
+        async function deleteItem(type, id) {
+            const apiUrl = type === 'todo' ? TODO_API_URL : NUMBER_API_URL;
+            await api(`${apiUrl}/${id}`, { method: 'DELETE' });
+            loadItems(type);
         }
 
-        // ページ読み込み完了時の処理
-        document.addEventListener('DOMContentLoaded', () => {
-            // 初期表示としてTODOリストを読み込む
-            loadTodos();
+        function toggleTodo(id, completed) {
+            toggleItem('todo', id, completed);
+        }
 
-            // フォームの送信イベントを処理
-            document.getElementById('todoForm').addEventListener('submit', e => {
-                // フォームのデフォルトの送信動作を防止
+        function toggleNumber(id, completed) {
+            toggleItem('number', id, completed);
+        }
+
+        function deleteTodo(id) {
+            deleteItem('todo', id);
+        }
+
+        function deleteNumber(id) {
+            deleteItem('number', id);
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            loadItems('todo');
+            loadItems('number');
+
+            document.getElementById('combinedForm').addEventListener('submit', e => {
                 e.preventDefault();
-                // 入力されたテキストを取得
-                const input = document.getElementById('todoInput');
-                const title = input.value.trim();
-                // テキストが入力されている場合のみTODOを追加
-                if (title) {
-                    addTodo(title);
-                    // 入力フィールドをクリア
-                    input.value = '';
+                const todoInput = document.getElementById('todoInput');
+                const numberInput = document.getElementById('numberInput');
+                const todoTitle = todoInput.value.trim();
+                const numberTitle = numberInput.value.trim();
+
+                if (todoTitle || numberTitle) {
+                    addItems(todoTitle, numberTitle);
+                    todoInput.value = '';
+                    numberInput.value = '';
                 }
             });
         });
     </script>
 </body>
-
 </html>

@@ -1,128 +1,257 @@
-from fastapi import (
-    FastAPI,
-    HTTPException,
-)  # FastAPIフレームワークの基本機能とエラー処理用のクラス
-from fastapi.middleware.cors import CORSMiddleware  # CORSを有効にするためのミドルウェア
-from fastapi.responses import HTMLResponse  # HTMLを返すためのレスポンスクラス
-from pydantic import BaseModel  # データのバリデーション（検証）を行うための基本クラス
-from typing import Optional  # 省略可能な項目を定義するために使用
-import sqlite3  # SQLiteデータベースを使用するためのライブラリ
-import uvicorn # ASGIサーバーを起動するためのライブラリ
+from fastapi import FastAPI, HTTPException
+
+from fastapi.middleware.cors import CORSMiddleware
+
+from fastapi.responses import HTMLResponse
+
+from pydantic import BaseModel
+
+from typing import Optional, List
+
+import sqlite3
+
+import uvicorn
 
 # FastAPIアプリケーションのインスタンスを作成
+
 app = FastAPI()
 
+# CORSを有効化（開発環境用設定）
 
-# corsを無効化（開発時のみ）
 app.add_middleware(
+
     CORSMiddleware,
+
     allow_origins=["*"],
+
     allow_credentials=True,
+
     allow_methods=["*"],
+
     allow_headers=["*"],
+
 )
 
+# データベース初期化処理
 
-# データベースの初期設定を行う関数
 def init_db():
-    # SQLiteデータベースに接続（ファイルが存在しない場合は新規作成）
-    with sqlite3.connect("todos.db") as conn:
-        # TODOを保存するテーブルを作成（すでに存在する場合は作成しない）
-        # 自動増分する一意のID（INTEGER PRIMARY KEY AUTOINCREMENT）
-        # TODOのタイトル（TEXT NOT NULL）
-        # 完了状態（BOOLEAN DEFAULT FALSE）
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS todos (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                title TEXT NOT NULL,
-                completed BOOLEAN DEFAULT FALSE
-            )
-        """
-        )
 
+    """データベースの初期化"""
+
+    with sqlite3.connect("app.db") as conn:
+
+        conn.execute(
+
+            """
+
+            CREATE TABLE IF NOT EXISTS todos (
+
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+                title TEXT NOT NULL,
+
+                completed BOOLEAN DEFAULT FALSE,
+
+                number INTEGER  DEFAULT 0
+
+            )
+
+            """
+
+        )
 
 # アプリケーション起動時にデータベースを初期化
+
 init_db()
 
+# リクエストデータの定義
 
-# リクエストボディのデータ構造を定義するクラス
-class Todo(BaseModel):
-    title: str  # TODOのタイトル（必須）
-    completed: Optional[bool] = False  # 完了状態（省略可能、デフォルトは未完了）
+class Item(BaseModel):
 
+    title: str
 
-# レスポンスのデータ構造を定義するクラス（TodoクラスにIDを追加）
-class TodoResponse(Todo):
-    id: int  # TODOのID
+    completed: Optional[bool] = False
 
+    number: int = 0
 
-# クライアント用のHTMLを返すエンドポイント
+class ItemResponse(Item):
+
+    id: int
+
+# HTMLクライアントの提供
+
 @app.get("/", response_class=HTMLResponse)
+
 def read_root():
+
+    """トップページにHTMLクライアントを提供"""
+
     with open("client.html", "r", encoding="utf-8") as f:
+
         return f.read()
 
+# データベース操作のヘルパー関数
 
-# 新規TODOを作成するエンドポイント
-@app.post("/todos", response_model=TodoResponse)
-def create_todo(todo: Todo):
-    with sqlite3.connect("todos.db") as conn:
-        cursor = conn.execute(
-            # SQLインジェクション対策のためパラメータ化したSQL文を使用
-            "INSERT INTO todos (title, completed) VALUES (?, ?)",
-            (todo.title, todo.completed),
+def execute_query(query: str, params: tuple = (), fetchone: bool = False, db_name: str = "app.db"):
+
+    """
+
+    データベース操作用の汎用関数
+
+    :param query: 実行するSQLクエリ
+
+    :param params: クエリに渡すパラメータ
+
+    :param fetchone: 単一行取得フラグ
+
+    :param db_name: データベース名
+
+    """
+
+    with sqlite3.connect(db_name) as conn:
+
+        cursor = conn.execute(query, params)
+
+        if query.strip().upper().startswith("SELECT"):
+
+            if fetchone:
+
+                return cursor.fetchone()
+
+            return cursor.fetchall()
+
+        conn.commit()
+
+        return cursor.lastrowid if "INSERT" in query.upper() else cursor.rowcount
+
+# 共通のCRUDエンドポイント群
+
+def create_endpoints(entity_name: str):
+
+    """
+
+    CRUDエンドポイントを生成
+
+    :param entity_name: エンティティ名（todosやnumbersなど）
+
+    """
+
+    table_name = entity_name
+
+    @app.post(f"/{table_name}s", response_model=ItemResponse)
+
+    def create_item(item: Item):
+
+        """新しいエンティティを作成"""
+
+        item_id = execute_query(
+
+            f"INSERT INTO {table_name}s (title, completed) VALUES (?, ?)",
+
+            (item.title, item.completed),
+
         )
-        todo_id = cursor.lastrowid  # 新しく作成されたTODOのIDを取得
-        return {"id": todo_id, "title": todo.title, "completed": todo.completed}
 
+        return {"id": item_id, "title": item.title, "completed": item.completed}
 
-# 全てのTODOを取得するエンドポイント
-@app.get("/todos")
-def get_todos():
-    with sqlite3.connect("todos.db") as conn:
-        todos = conn.execute("SELECT * FROM todos").fetchall()  # 全てのTODOを取得
-        # データベースから取得したタプルをJSON形式に変換して返す
-        return [{"id": t[0], "title": t[1], "completed": bool(t[2])} for t in todos]
+    @app.get(f"/{table_name}s", response_model=List[ItemResponse])
 
+    def get_items():
 
-# 指定されたIDのTODOを取得するエンドポイント
-@app.get("/todos/{todo_id}")
-def get_todo(todo_id: int):
-    with sqlite3.connect("todos.db") as conn:
-        # 指定されたIDのTODOを検索
-        todo = conn.execute(
-            "SELECT * FROM todos WHERE id = ?", (todo_id,)).fetchone()
-        if not todo:  # TODOが見つからない場合は404エラーを返す
-            raise HTTPException(status_code=404, detail="Todo not found")
-        return {"id": todo[0], "title": todo[1], "completed": bool(todo[2])}
+        """すべてのエンティティを取得"""
 
+        items = execute_query(f"SELECT * FROM {table_name}s")
 
-# 指定されたIDのTODOを更新するエンドポイント
-@app.put("/todos/{todo_id}")
-def update_todo(todo_id: int, todo: Todo):
-    with sqlite3.connect("todos.db") as conn:
-        # タイトルと完了状態を更新
-        cursor = conn.execute(
-            "UPDATE todos SET title = ?, completed = ? WHERE id = ?",
-            (todo.title, todo.completed, todo_id),
+        return [{"id": t[0], "title": t[1], "completed": bool(t[2])} for t in items]
+
+    @app.get(f"/{table_name}s/{{item_id}}", response_model=ItemResponse)
+
+    def get_item(item_id: int):
+
+        """特定のエンティティを取得"""
+
+        item = execute_query(f"SELECT * FROM {table_name}s WHERE id = ?", (item_id,), fetchone=True)
+
+        if not item:
+
+            raise HTTPException(status_code=404, detail=f"{entity_name.capitalize()} not found")
+
+        return {"id": item[0], "title": item[1], "completed": bool(item[2])}
+
+    @app.put(f"/{table_name}s/{{item_id}}", response_model=ItemResponse)
+
+    def update_item(item_id: int, item: Item):
+
+        """特定のエンティティを更新"""
+
+        rows = execute_query(
+
+            f"UPDATE {table_name}s SET title = ?, completed = ? WHERE id = ?",
+
+            (item.title, item.completed, item_id),
+
         )
-        if cursor.rowcount == 0:  # 更新対象のTODOが存在しない場合は404エラーを返す
-            raise HTTPException(status_code=404, detail="Todo not found")
-        return {"id": todo_id, "title": todo.title, "completed": todo.completed}
 
+        if rows == 0:
 
-# 指定されたIDのTODOを削除するエンドポイント
-@app.delete("/todos/{todo_id}")
-def delete_todo(todo_id: int):
-    with sqlite3.connect("todos.db") as conn:
-        # 指定されたIDのTODOを削除
-        cursor = conn.execute("DELETE FROM todos WHERE id = ?", (todo_id,))
-        if cursor.rowcount == 0:  # 削除対象のTODOが存在しない場合は404エラーを返す
-            raise HTTPException(status_code=404, detail="Todo not found")
-        return {"message": "Todo deleted"}
+            raise HTTPException(status_code=404, detail=f"{entity_name.capitalize()} not found")
 
+        return {"id": item_id, "title": item.title, "completed": item.completed}
+
+    @app.delete(f"/{table_name}s/{{item_id}}")
+
+    def delete_item(item_id: int):
+
+        """特定のエンティティを削除"""
+
+        rows = execute_query(f"DELETE FROM {table_name}s WHERE id = ?", (item_id,))
+
+        if rows == 0:
+
+            raise HTTPException(status_code=404, detail=f"{entity_name.capitalize()} not found")
+
+        return {"message": f"{entity_name.capitalize()} deleted"}
+
+# 特定のエンドポイントを作成
+
+create_endpoints("todo")
+
+create_endpoints("number")
+
+# TODOとNumberを同時に投稿するエンドポイント
+
+@app.post("/combined")
+
+def create_combined(todo: Item, number: Item):
+
+    """TODOとNumberを同時に作成"""
+
+    todo_id = execute_query(
+
+        "INSERT INTO todos (title, completed) VALUES (?, ?)",
+
+        (todo.title, todo.completed),
+
+    )
+
+    number_id = execute_query(
+
+        "INSERT INTO numbers (title, completed) VALUES (?, ?)",
+
+        (number.title, number.completed),
+
+    )
+
+    return {
+
+        "todo": {"id": todo_id, "title": todo.title, "completed": todo.completed},
+
+        "number": {"id": number_id, "title": number.title, "completed": number.completed},
+
+    }
+
+# アプリケーションを起動
 
 if __name__ == "__main__":
-    # FastAPIアプリケーションを非同期モードで起動
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+
+    uvicorn.run(app, host="0.0.0.0", port=8000) 
