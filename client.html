@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!DOCTYPE html> 
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
@@ -10,44 +10,65 @@
             max-width: 800px;
             margin: 0 auto;
             padding: 20px;
+            background-color: #f4f4f4;
         }
 
-        .todo-form {
-            margin: 1rem 0;
+        h1 {
+            text-align: center;
+            color: #333;
         }
 
-        .completed {
-            text-decoration: line-through;
-            color: gray;
+        h2 {
+            margin-top: 20px;
+            color: #555;
         }
 
         form {
-            margin-bottom: 20px;
+            display: flex;
+            justify-content: center; /* ボタンを中央揃えに */
+            gap: 10px; /* 入力欄とボタンの間隔を10pxに設定 */
+            flex-wrap: wrap; /* 画面が小さくなった場合に折り返しをする */
         }
 
-        input[type="text"] {
-            padding: 8px;
-            margin-right: 10px;
-            border: 1px solid #ddd;
+        input[type="text"], input[type="number"] {
+            padding: 12px 20px;
+            font-size: 16px;
             border-radius: 4px;
+            border: 1px solid #ddd;
+            width: 48%; /* 入力欄の幅を50%未満に設定して横並びに */
+            box-sizing: border-box;
         }
 
         button {
-            padding: 8px 15px;
+            padding: 12px 200px;
+            font-size: 16px;
             background-color: #4CAF50;
             color: white;
             border: none;
             border-radius: 4px;
             cursor: pointer;
+            width: 60; /* ボタンの幅を自動調整 */
+            margin-top: 10px; /* ボタンと他の要素の間隔 */
         }
 
         button:hover {
             background-color: #45a049;
         }
 
+        .lists-container {
+            display: flex;
+            justify-content: space-between;
+            gap: 20px;
+        }
+
+        .list-section {
+            width: 48%;
+        }
+
         ul {
             list-style: none;
             padding: 0;
+            margin-top: 10px;
         }
 
         li {
@@ -55,8 +76,9 @@
             align-items: center;
             padding: 10px;
             margin: 5px 0;
-            background-color: #f9f9f9;
+            background-color: #fff;
             border-radius: 4px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
         }
 
         li input[type="checkbox"] {
@@ -69,7 +91,13 @@
         }
 
         li button {
+            padding: 6px 12px;
             background-color: #f44336;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
         }
 
         li button:hover {
@@ -86,6 +114,9 @@
         <input type="number" id="numberInput" placeholder="人数を入力" required>
         <button type="submit">予約する</button>
     </form>
+
+    <br>
+    </br>
 
     <div class="lists-container">
         <div class="list-section">
@@ -115,27 +146,28 @@
         }
 
         function renderItem(item, type) {
-            const toggleFunction = type === 'todo' ? 'toggleTodo' : 'toggleNumber';
-            const deleteFunction = type === 'todo' ? 'deleteTodo' : 'deleteNumber';
             return `
                 <li>
                     <input type="checkbox" 
                            ${item.completed ? 'checked' : ''} 
-                           onchange="${toggleFunction}(${item.id}, this.checked)">
+                           onchange="toggleItem(${item.id}, this.checked)">
                     <span class="${item.completed ? 'completed' : ''}">${item.title}</span>
-                    <button onclick="${deleteFunction}(${item.id})">削除</button>
+                    <button onclick="deleteItem(${item.id})">削除</button>
                 </li>
             `;
         }
 
-        async function loadItems(type) {
-            const apiUrl = type === 'todo' ? TODO_API_URL : NUMBER_API_URL;
-            const listId = type === 'todo' ? 'todoList' : 'numberList';
-            const items = await api(apiUrl);
-            if (items) {
-                document.getElementById(listId).innerHTML = 
-                    items.map(item => renderItem(item, type)).join('');
-            }
+        async function loadItems() {
+            const todoItems = await api(TODO_API_URL);
+            const numberItems = await api(NUMBER_API_URL);
+            
+            // 名前リストを更新
+            document.getElementById('todoList').innerHTML = 
+                todoItems.map(item => renderItem(item, 'todo')).join('');
+
+            // 人数リストを更新
+            document.getElementById('numberList').innerHTML = 
+                numberItems.map(item => renderItem(item, 'number')).join('');
         }
 
         async function addItems(todoTitle, numberTitle) {
@@ -155,48 +187,20 @@
                 });
             }
 
-            loadItems('todo');
-            loadItems('number');
+            loadItems();
         }
 
-        async function toggleItem(type, id, completed) {
-            const apiUrl = type === 'todo' ? TODO_API_URL : NUMBER_API_URL;
-            const item = await api(`${apiUrl}/${id}`);
-            if (item) {
-                await api(`${apiUrl}/${id}`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ ...item, completed })
-                });
-                loadItems(type);
-            }
-        }
-
-        async function deleteItem(type, id) {
-            const apiUrl = type === 'todo' ? TODO_API_URL : NUMBER_API_URL;
-            await api(`${apiUrl}/${id}`, { method: 'DELETE' });
-            loadItems(type);
-        }
-
-        function toggleTodo(id, completed) {
-            toggleItem('todo', id, completed);
-        }
-
-        function toggleNumber(id, completed) {
-            toggleItem('number', id, completed);
-        }
-
-        function deleteTodo(id) {
-            deleteItem('todo', id);
-        }
-
-        function deleteNumber(id) {
-            deleteItem('number', id);
+        async function deleteItem(id) {
+            // 名前と人数の両方を削除
+            await Promise.all([
+                api(`${TODO_API_URL}/${id}`, { method: 'DELETE' }),
+                api(`${NUMBER_API_URL}/${id}`, { method: 'DELETE' })
+            ]);
+            loadItems();
         }
 
         document.addEventListener('DOMContentLoaded', () => {
-            loadItems('todo');
-            loadItems('number');
+            loadItems();
 
             document.getElementById('combinedForm').addEventListener('submit', e => {
                 e.preventDefault();
